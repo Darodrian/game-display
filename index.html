@@ -96,7 +96,6 @@
       flex: 1;
       accent-color: var(--ui-mod);
     }
-    #tuner-animplay { width: 64px; }
   </style>
 </head>
 <body>
@@ -105,11 +104,6 @@
     <div class="tuner-row">
       <label for="tuner-model">Model</label>
       <select id="tuner-model"></select>
-    </div>
-    <div class="tuner-row" id="tuner-anim-row" style="display:none;">
-      <label for="tuner-anim">Animation</label>
-      <select id="tuner-anim"></select>
-      <button id="tuner-animplay">Pause</button>
     </div>
     <div class="tuner-row" id="tuner-skin-row" style="display:none;">
       <label for="tuner-skin">Skin</label>
@@ -144,37 +138,53 @@
   ></model-viewer>
   <script type="module" src="https://unpkg.com/@google/model-viewer@4.1.0/dist/model-viewer.min.js"></script>
   <script>
-    // ===== PURE GLB CORE (no DOM) =====
-    // Rewrites models/cd__jewel_case.glb so each case surface carries Vagrant
-    // Story artwork. Everything here is pure byte/JSON work so it can also be
-    // exercised outside the browser.
+    var MODELS = [
+      "cd__jewel_case.glb"
+    ];
 
-    // rect = [uMin, uMax, vMin, vMax] inside the source artwork's UV space.
-    // transform: orientation fixups applied after the rect is mapped to [0,1]^2.
-    //   swap:  exchange u and v (the source axes are transposed on this face)
-    //   flipU/flipV: mirror one axis
-    // planar: ignore the source UVs and re-project the artwork planar-style from
-    //   local POSITION, which is what a circular disc label wants.
-    //
-    // The transforms below were confirmed visually in the browser. They cannot
-    // be derived from the geometry: every material in this GLB is doubleSided,
-    // so nothing in the file distinguishes a face's visible side from its hidden
-    // side, and an automated orientation check on the UVs is therefore
-    // unreliable. Treat these as the source of truth.
-    var CD_SURFACES = {
-      front: {
-        mesh: "Object_6", rect: [0, 1, 0, 1], whole: true,
-        transform: { flipV: true }
-      },
-      back: { mesh: "Object_1", rect: [0, 0.4809, 0, 0.4856], transform: { swap: true } },
-      spine: { mesh: "Object_2", rect: [0.9618, 0.9825, 0, 0.4814],
-        transform: { flipV: true } },
-      disc: { mesh: "Object_7", whole: true, planar: true }
+    var SKINS = {
+      "cd__jewel_case.glb": [
+        { id: "original", label: "Original", surfaces: null },
+        {
+          id: "vagrant-story",
+          label: "Vagrant Story",
+          surfaces: {
+            front: { src: "./media/vagrant-story/front.jpg", mime: "image/jpeg" },
+            back: { src: "./media/vagrant-story/back.jpg", mime: "image/jpeg" },
+            spine: { src: "./media/vagrant-story/spine.jpg", mime: "image/jpeg" },
+            disc: { src: "./media/vagrant-story/cd.png", mime: "image/png" }
+          }
+        },
+        {
+          id: "aconcagua",
+          label: "Aconcagua",
+          surfaces: {
+            front: { src: "./media/aconcagua/front.jpg", mime: "image/jpeg" },
+            back: { src: "./media/aconcagua/back.jpg", mime: "image/jpeg" },
+            spine: { src: "./media/aconcagua/spine.jpg", mime: "image/jpeg" },
+            disc: { src: "./media/aconcagua/cd.png", mime: "image/png" }
+          }
+        },
+        {
+          id: "mega-man-x6",
+          label: "Mega Man X6",
+          surfaces: {
+            front: { src: "./media/mega-man-x6/front.jpg", mime: "image/jpeg" },
+            back: { src: "./media/mega-man-x6/back.jpg", mime: "image/jpeg" },
+            spine: { src: "./media/mega-man-x6/spine.jpg", mime: "image/jpeg" },
+            disc: { src: "./media/mega-man-x6/cd.png", mime: "image/png" }
+          }
+        }
+      ]
     };
 
-    // art: role whose artwork this mesh receives (null = plain plastic).
-    // innerTop: the N largest components become light inner faces, the rest rim.
-    // passthrough: leave the primitive exactly as authored (material and UVs).
+    var CD_SURFACES = {
+      front: { transform: { flipV: true } },
+      back: { rect: [0, 0.4809, 0, 0.4856], transform: { swap: true } },
+      spine: { rect: [0.9618, 0.9825, 0, 0.4814], transform: { flipV: true } },
+      disc: { planar: true }
+    };
+
     var CD_MESH_PLAN = [
       { mesh: "Object_0", art: null, innerTop: 3 },
       { mesh: "Object_1", art: "back", innerTop: 0 },
@@ -235,8 +245,6 @@
       return out;
     }
 
-    // Appends past the end of the original buffer so existing accessor offsets
-    // stay valid; finish() returns one contiguous buffer.
     function makeAppender(bin) {
       var chunks = [];
       var cursor = bin.length;
@@ -280,11 +288,9 @@
           }
         }
       }
-      return { data: out, count: acc.count, comps: comps, componentType: acc.componentType };
+      return { data: out, count: acc.count };
     }
 
-    // Union-find over shared vertices: each disconnected cluster of a mesh is
-    // one component, which is what we retarget the artwork onto.
     function findComponents(json, bin, prim) {
       var pos = readAccessor(json, bin, prim.attributes.POSITION);
       var uv = readAccessor(json, bin, prim.attributes.TEXCOORD_0);
@@ -338,7 +344,7 @@
           var bx = pos.data[p2] - pos.data[p0], by = pos.data[p2 + 1] - pos.data[p0 + 1], bz = pos.data[p2 + 2] - pos.data[p0 + 2];
           area += 0.5 * Math.hypot(ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx);
         }
-        out.push({ root: root, verts: verts, tris: tris, rect: [u0, u1, v0, v1], area: area });
+        out.push({ verts: verts, tris: tris, rect: [u0, u1, v0, v1], area: area });
       });
       out.sort(function (x, y) { return y.area - x.area; });
       return { comps: out, vertexCount: pos.count };
@@ -367,9 +373,6 @@
       return bestErr <= tol ? best : null;
     }
 
-    // Stretches the given UV rectangle onto [0,1]^2 so the artwork lines up, then
-    // applies the surface's orientation transform. A transform never touches the
-    // artwork bytes, only the coordinates, so no image re-encoding is needed.
     function rewriteUvs(json, bin, uvIndex, verts, rect, transform) {
       var acc = json.accessors[uvIndex];
       if (acc.componentType !== 5126) {
@@ -406,15 +409,6 @@
       }
     }
 
-    // Re-projects a flat disc mesh planar-style from local POSITION so square
-    // artwork lands as a normal circular label. The disc is authored as a polar
-    // fan (u = angle, v = radius), which cannot carry circular art.
-    // The disc is flat in local X/Z with local +Y as its face normal. The scene
-    // rotates local +X onto world up and local +Z across the face, so v is
-    // driven by X and u by Z. Only v is subtracted: negating a single axis
-    // mirrors the label, and that is deliberate, because the disc is read from
-    // the reverse face where unmirrored artwork would come out backwards. The
-    // handedness is therefore correct for that viewing side only.
     function projectDiscUvs(json, bin, posIndex, uvIndex) {
       var pos = readAccessor(json, bin, posIndex);
       var acc = json.accessors[uvIndex];
@@ -448,7 +442,6 @@
         dv.setFloat32(base + i * stride, u < 0 ? 0 : u > 1 ? 1 : u, true);
         dv.setFloat32(base + i * stride + size, v < 0 ? 0 : v > 1 ? 1 : v, true);
       }
-      return { center: [cx, cz], radius: radius };
     }
 
     function addIndexAccessor(json, app, indices, vertexCount) {
@@ -484,8 +477,6 @@
       return json.materials.length - 1;
     }
 
-    // baseBytes: pristine GLB. surfaces: { role: { bytes, mime } } for every
-    // key of CD_SURFACES. Returns a new patched GLB as a Uint8Array.
     function patchCdSkin(baseBytes, surfaces) {
       var parts = splitGlb(baseBytes);
       var json = parts.json;
@@ -499,8 +490,6 @@
         if (!surfaces[role]) throw new Error("skin is missing surface: " + role);
       });
 
-      // One shared sampler: clamped edges so remapped artwork never bleeds
-      // into its neighbour.
       json.samplers.push({ magFilter: 9729, minFilter: 9987, wrapS: 33071, wrapT: 33071 });
       var samplerIndex = json.samplers.length - 1;
 
@@ -519,9 +508,6 @@
       var artMat = {};
       function artMaterial(role) {
         if (artMat[role] === undefined) {
-          // Uniform roughness throughout: the source gloss maps belong to the
-          // placeholder artwork this skin replaces, so they no longer describe
-          // the surface once the UVs are re-oriented.
           var pbr = {
             baseColorTexture: { index: texIndex[role] },
             baseColorFactor: [1, 1, 1, 1],
@@ -539,7 +525,6 @@
         return artMat[role];
       }
 
-      // Pass 1: analyse every mesh against the original bytes.
       var analysis = [];
       CD_MESH_PLAN.forEach(function (plan) {
         var meshIndex = -1;
@@ -556,7 +541,6 @@
           plan: plan,
           mesh: mesh,
           prim: prim,
-          origMat: prim.material === undefined ? null : json.materials[prim.material],
           comps: null,
           vertexCount: 0,
           artComp: null,
@@ -565,9 +549,6 @@
         };
         if (!plan.passthrough) {
           if (plan.whole) {
-            // Disc is hundreds of loose triangles, so remap the whole mesh
-            // affinely instead of splitting per component. A planar surface
-            // ignores the authored UVs entirely and re-projects from POSITION.
             var uv = readAccessor(json, parts.bin, prim.attributes.TEXCOORD_0);
             var all = new Array(uv.count);
             for (var i = 0; i < uv.count; i++) all[i] = i;
@@ -593,14 +574,9 @@
         analysis.push(entry);
       });
 
-      // Pass 2: rebuild primitives and allocate new index accessors.
       analysis.forEach(function (entry) {
         var plan = entry.plan;
-        if (plan.passthrough) {
-          // Keep the primitive exactly as authored, including its original
-          // material and UVs.
-          return;
-        }
+        if (plan.passthrough) return;
         if (plan.whole) {
           entry.prim.material = artMaterial(plan.art);
           return;
@@ -620,7 +596,6 @@
         entry.mesh.primitives = prims;
       });
 
-      // Pass 3: append-only buffer, then retarget the artwork UVs in place.
       var bin = app.finish();
       analysis.forEach(function (entry) {
         if (!entry.artVerts) return;
@@ -639,14 +614,9 @@
 
       return buildGlb(json, bin);
     }
-    // ===== END PURE GLB CORE =====
 
-    // ===== DOM WIRING =====
     var tuner = document.getElementById("tuner");
     var modelSel = document.getElementById("tuner-model");
-    var animRow = document.getElementById("tuner-anim-row");
-    var animSel = document.getElementById("tuner-anim");
-    var animPlay = document.getElementById("tuner-animplay");
     var skinRow = document.getElementById("tuner-skin-row");
     var skinSel = document.getElementById("tuner-skin");
     var rotateBtn = document.getElementById("tuner-rotate");
@@ -655,94 +625,33 @@
     var resetBtn = document.getElementById("tuner-reset");
     var viewer = document.getElementById("viewer");
 
-    var SKINS = {
-      "cd__jewel_case.glb": [
-        { id: "original", label: "Original", surfaces: null },
-        {
-          id: "vagrant-story",
-          label: "Vagrant Story",
-          surfaces: {
-            front: { src: "./media/vagrant-story/front.jpg", mime: "image/jpeg" },
-            back: { src: "./media/vagrant-story/back.jpg", mime: "image/jpeg" },
-            spine: { src: "./media/vagrant-story/spine.jpg", mime: "image/jpeg" },
-            disc: { src: "./media/vagrant-story/cd.png", mime: "image/png" }
-          }
-        },
-        {
-          id: "aconcagua",
-          label: "Aconcagua",
-          surfaces: {
-            front: { src: "./media/aconcagua/front.jpg", mime: "image/jpeg" },
-            back: { src: "./media/aconcagua/back.jpg", mime: "image/jpeg" },
-            spine: { src: "./media/aconcagua/spine.jpg", mime: "image/jpeg" },
-            disc: { src: "./media/aconcagua/cd.png", mime: "image/png" }
-          }
-        },
-        {
-          id: "mega-man-x6",
-          label: "Mega Man X6",
-          surfaces: {
-            front: { src: "./media/mega-man-x6/front.jpg", mime: "image/jpeg" },
-            back: { src: "./media/mega-man-x6/back.jpg", mime: "image/jpeg" },
-            spine: { src: "./media/mega-man-x6/spine.jpg", mime: "image/jpeg" },
-            disc: { src: "./media/mega-man-x6/cd.png", mime: "image/png" }
-          }
-        }
-      ]
-    };
-
     var rotateOn = viewer.hasAttribute("auto-rotate");
-    rotateBtn.textContent = rotateOn ? "On" : "Off";
-
     var lastSrc = "";
     var byteCache = {};
     var blobURL = null;
-    // Blob URLs cannot be revoked until the viewer finishes with them, and
-    // several can be superseded before that load arrives, so queue them all.
-    // A single slot would silently drop every URL but the most recent.
     var staleURLs = [];
     var skinToken = 0;
-
-    viewer.addEventListener("load", function () {
-      staleURLs.forEach(function (url) { URL.revokeObjectURL(url); });
-      staleURLs.length = 0;
-      syncAnimUI();
-    });
-
-    viewer.addEventListener("error", function () {
-      console.warn("Model failed to load:", lastSrc);
-    });
 
     function fitModel() {
       viewer.cameraOrbit = "0deg 75deg 105%";
       viewer.cameraTarget = "auto auto auto";
     }
 
-    function syncAnimUI() {
-      var names = viewer.availableAnimations || [];
-      if (!names.length) {
-        animRow.style.display = "none";
+    function syncSkinUI(model) {
+      var list = SKINS[model];
+      if (!list) {
+        skinRow.style.display = "none";
         return;
       }
-      animRow.style.display = "";
-      animSel.innerHTML = "";
-      var empty = document.createElement("option");
-      empty.value = "";
-      empty.textContent = "(Default)";
-      animSel.appendChild(empty);
-      names.forEach(function (n) {
+      skinSel.innerHTML = "";
+      list.forEach(function (skin) {
         var opt = document.createElement("option");
-        opt.value = n;
-        opt.textContent = n;
-        animSel.appendChild(opt);
+        opt.value = skin.id;
+        opt.textContent = skin.label;
+        skinSel.appendChild(opt);
       });
-      animSel.value = "";
-      animPlay.disabled = true;
-      animPlay.textContent = viewer.paused ? "Play" : "Pause";
-    }
-
-    function returnToDefaultPose() {
-      viewer.animationName = undefined;
+      skinSel.value = list[0].id;
+      skinRow.style.display = "";
     }
 
     function labelize(name) {
@@ -789,6 +698,7 @@
 
       if (!skin || !skin.surfaces) {
         releaseBlob();
+        lastSrc = path;
         viewer.src = path;
         return;
       }
@@ -800,7 +710,6 @@
         });
       }))).then(function (results) {
         var surfaces = {};
-        // results[0] is the pristine GLB; results[1..] are { role, bytes } artwork entries.
         for (var i = 1; i < results.length; i++) {
           surfaces[results[i].role] = { bytes: results[i].bytes, mime: skin.surfaces[results[i].role].mime };
         }
@@ -808,6 +717,7 @@
         if (token !== skinToken) return;
         releaseBlob();
         blobURL = URL.createObjectURL(new Blob([patched], { type: "model/gltf-binary" }));
+        lastSrc = blobURL;
         viewer.src = blobURL;
       }).catch(function (err) {
         console.error("Skin failed:", err);
@@ -815,25 +725,7 @@
       });
     }
 
-    function syncSkinUI(model) {
-      var list = SKINS[model];
-      if (!list) {
-        skinRow.style.display = "none";
-        return;
-      }
-      skinSel.innerHTML = "";
-      list.forEach(function (skin) {
-        var opt = document.createElement("option");
-        opt.value = skin.id;
-        opt.textContent = skin.label;
-        skinSel.appendChild(opt);
-      });
-      skinSel.value = list[0].id;
-      skinRow.style.display = "";
-    }
-
     function loadModel(model) {
-      lastSrc = "./models/" + model;
       syncSkinUI(model);
       applySkin(model, skinSel.value || "");
       fitModel();
@@ -856,16 +748,9 @@
       }
     }
 
-    var MODELS = [
-      "cd__jewel_case.glb"
-    ];
-
-    buildSelect(MODELS);
-
     function applySpeed() {
       var deg = parseInt(speedRange.value, 10);
       speedOut.textContent = deg;
-      viewer.setAttribute("rotation-per-second", deg + "deg");
       viewer.rotationPerSecond = deg + "deg";
       if (rotateOn) {
         viewer.autoRotate = false;
@@ -875,35 +760,22 @@
       }
     }
 
+    viewer.addEventListener("load", function () {
+      staleURLs.forEach(function (url) { URL.revokeObjectURL(url); });
+      staleURLs.length = 0;
+    });
+
+    viewer.addEventListener("error", function () {
+      console.warn("Model failed to load:", lastSrc);
+    });
+
     modelSel.addEventListener("change", function () {
       loadModel(modelSel.value);
     });
 
     skinSel.addEventListener("change", function () {
       var model = modelSel.value;
-      lastSrc = SKINS[model] ? skinSel.value : model;
       applySkin(model, skinSel.value);
-    });
-
-    animSel.addEventListener("change", function () {
-      if (animSel.value) {
-        viewer.animationName = animSel.value;
-        viewer.play();
-        animPlay.disabled = false;
-        animPlay.textContent = "Pause";
-      } else {
-        returnToDefaultPose();
-        animPlay.disabled = true;
-      }
-    });
-
-    animPlay.addEventListener("click", function () {
-      if (viewer.paused) {
-        viewer.play();
-      } else {
-        viewer.pause();
-      }
-      animPlay.textContent = viewer.paused ? "Play" : "Pause";
     });
 
     rotateBtn.addEventListener("click", function () {
@@ -927,6 +799,8 @@
       }
     });
 
+    rotateBtn.textContent = rotateOn ? "On" : "Off";
+    buildSelect(MODELS);
     applySpeed();
   </script>
 </body>
