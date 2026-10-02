@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-store">
+  <title>Game Display</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --ui-mod: #ff7b6b;
+      --ui-dim: rgba(244, 241, 234, 0.5);
+    }
+    html, body {
+      position: fixed;
+      inset: 0;
+      margin: 0;
+      overflow: hidden;
+      background: transparent;
+    }
+    model-viewer {
+      width: 100vw;
+      height: 100vh;
+      display: block;
+    }
+    #tuner {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      z-index: 1000;
+      width: 290px;
+      padding: 12px;
+      background: #14120f;
+      border: 2px solid #54514a;
+      box-shadow: 3px 3px 0 #050505;
+      color: #f4f1ea;
+      font-family: 'Press Start 2P', monospace;
+      font-size: 10px;
+      display: none;
+      user-select: none;
+    }
+    #tuner.show { display: block; }
+    #tuner h1 {
+      margin: 0 0 8px 0;
+      font-size: 10px;
+      letter-spacing: 1px;
+      color: var(--ui-mod);
+    }
+    #tuner h1 span { color: var(--ui-dim); font-size: 8px; }
+    #tuner .tuner-row {
+      display: flex;
+      align-items: center;
+      margin: 6px 0;
+      line-height: 1.4;
+    }
+    #tuner .tuner-row label {
+      flex: 1;
+      margin-right: 8px;
+    }
+    #tuner .tuner-row output {
+      min-width: 28px;
+      text-align: right;
+      color: #ffffff;
+    }
+    #tuner button {
+      width: 88px;
+      height: 28px;
+      padding: 0;
+      background: #54514a;
+      border: 2px solid #33312c;
+      box-shadow: 2px 2px 0 #050505;
+      color: #f4f1ea;
+      font-family: inherit;
+      font-size: 10px;
+      cursor: pointer;
+    }
+    #tuner button:active { transform: translate(2px, 2px); box-shadow: none; }
+    #tuner select {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      height: 28px;
+      padding: 0 4px;
+      background: #14120f;
+      border: 2px solid #54514a;
+      color: #f4f1ea;
+      font-family: inherit;
+      font-size: 10px;
+      cursor: pointer;
+    }
+    #tuner input[type="range"] {
+      flex: 1;
+      accent-color: var(--ui-mod);
+    }
+    #tuner-animplay { width: 64px; }
+  </style>
+</head>
+<body>
+  <div id="tuner">
+    <h1>Tuner <span>(F)</span></h1>
+    <div class="tuner-row">
+      <label for="tuner-model">Model</label>
+      <select id="tuner-model"></select>
+    </div>
+    <div class="tuner-row" id="tuner-anim-row" style="display:none;">
+      <label for="tuner-anim">Animation</label>
+      <select id="tuner-anim"></select>
+      <button id="tuner-animplay">Pause</button>
+    </div>
+    <div class="tuner-row" id="tuner-skin-row" style="display:none;">
+      <label for="tuner-skin">Skin</label>
+      <select id="tuner-skin"></select>
+    </div>
+    <div class="tuner-row">
+      <label for="tuner-rotate">Auto-Rotate</label>
+      <button id="tuner-rotate">Off</button>
+    </div>
+    <div class="tuner-row">
+      <label for="tuner-speed">Rotate Speed</label>
+      <input id="tuner-speed" type="range" min="5" max="150" step="1" value="30">
+      <output id="speed-out">30</output>
+    </div>
+    <div class="tuner-row">
+      <label>Reset</label>
+      <button id="tuner-reset">Reset View</button>
+    </div>
+  </div>
+
+  <model-viewer
+    id="viewer"
+    alt="3D model"
+    background-color="transparent"
+    camera-controls
+    auto-rotate
+    rotation-per-second="30deg"
+    shadow-intensity="0.6"
+    shadow-softness="1"
+    environment-image="neutral"
+    exposure="1"
+  ></model-viewer>
+  <script type="module" src="https://unpkg.com/@google/model-viewer@4.1.0/dist/model-viewer.min.js"></script>
+  <script>
+    // ===== PURE GLB CORE (no DOM) =====
+    // Rewrites models/cd__jewel_case.glb so each case surface carries Vagrant
+    // Story artwork. Everything here is pure byte/JSON work so it can also be
+    // exercised outside the browser.
+
+    // rect = [uMin, uMax, vMin, vMax] inside the source artwork's UV space.
+    // transform: orientation fixups applied after the rect is mapped to [0,1]^2.
+    //   swap:  exchange u and v (the source axes are transposed on this face)
+    //   flipU/flipV: mirror one axis
+    // planar: ignore the source UVs and re-project the artwork planar-style from
+    //   local POSITION, which is what a circular disc label wants.
+    //
+    // The transforms below were confirmed visually in the browser. They cannot
+    // be derived from the geometry: every material in this GLB is doubleSided,
+    // so nothing in the file distinguishes a face's visible side from its hidden
+    // side, and an automated orientation check on the UVs is therefore
+    // unreliable. Treat these as the source of truth.
+    var CD_SURFACES = {
+      front: {
+        mesh: "Object_6", rect: [0, 1, 0, 1], whole: true,
+        transform: { flipV: true }
+      },
+      back: { mesh: "Object_1", rect: [0, 0.4809, 0, 0.4856], transform: { swap: true } },
+      spine: { mesh: "Object_2", rect: [0.9618, 0.9825, 0, 0.4814],
+        transform: { flipV: true } },
+      disc: { mesh: "Object_7", whole: true, planar: true }
+    };
+
+    // art: role whose artwork this mesh receives (null = plain plastic).
+    // innerTop: the N largest components become light inner faces, the rest rim.
+    // passthrough: leave the primitive exactly as authored (material and UVs).
+    var CD_MESH_PLAN = [
+      { mesh: "Object_0", art: null, innerTop: 3 },
+      { mesh: "Object_1", art: "back", innerTop: 0 },
+      { mesh: "Object_2", art: "spine", innerTop: 0 },
+      { mesh: "Object_3", art: null, innerTop: 0 },
+      { mesh: "Object_4", art: null, innerTop: 0 },
+      { mesh: "Object_5", art: null, innerTop: 1 },
+      { mesh: "Object_6", art: "front", whole: true },
+      { mesh: "Object_7", art: "disc", whole: true },
+      { mesh: "Object_8", art: null, passthrough: true }
+    ];
+
+    var CD_COLORS = {
+      inner: [0.62, 0.63, 0.64, 1],
+      rim: [0.28, 0.28, 0.3, 1]
+    };
+
+    var GLB_JSON_CHUNK = 0x4e4f534a;
+    var GLB_BIN_CHUNK = 0x004e4942;
+    var COMP_SIZE = { 5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4 };
+    var COMP_COUNT = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 };
+
+    function splitGlb(bytes) {
+      var dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      if (dv.getUint32(0, true) !== 0x46546c67) throw new Error("not a GLB file");
+      var out = { json: null, bin: null };
+      var off = 12;
+      while (off + 8 <= bytes.length) {
+        var len = dv.getUint32(off, true);
+        var type = dv.getUint32(off + 4, true);
+        var body = bytes.subarray(off + 8, off + 8 + len);
+        if (type === GLB_JSON_CHUNK) out.json = JSON.parse(new TextDecoder().decode(body));
+        else if (type === GLB_BIN_CHUNK) out.bin = body;
+        off += 8 + len;
+      }
+      if (!out.json || !out.bin) throw new Error("GLB is missing its JSON or BIN chunk");
+      return out;
+    }
+
+    function buildGlb(json, bin) {
+      var jsonBytes = new TextEncoder().encode(JSON.stringify(json));
+      var jsonPad = (4 - (jsonBytes.length % 4)) % 4;
+      var binPad = (4 - (bin.length % 4)) % 4;
+      var total = 12 + 8 + jsonBytes.length + jsonPad + 8 + bin.length + binPad;
+      var out = new Uint8Array(total);
+      var dv = new DataView(out.buffer);
+      dv.setUint32(0, 0x46546c67, true);
+      dv.setUint32(4, 2, true);
+      dv.setUint32(8, total, true);
+      dv.setUint32(12, jsonBytes.length + jsonPad, true);
+      dv.setUint32(16, GLB_JSON_CHUNK, true);
+      out.set(jsonBytes, 20);
+      out.fill(0x20, 20 + jsonBytes.length, 20 + jsonBytes.length + jsonPad);
+      var p = 20 + jsonBytes.length + jsonPad;
+      dv.setUint32(p, bin.length + binPad, true);
+      dv.setUint32(p + 4, GLB_BIN_CHUNK, true);
+      out.set(bin, p + 8);
+      return out;
+    }
+
+    // Appends past the end of the original buffer so existing accessor offsets
+    // stay valid; finish() returns one contiguous buffer.
+    function makeAppender(bin) {
+      var chunks = [];
+      var cursor = bin.length;
+      return {
+        add: function (bytes) {
+          while (cursor % 4) cursor++;
+          var off = cursor;
+          cursor += bytes.length;
+          chunks.push({ off: off, bytes: bytes });
+          return off;
+        },
+        finish: function () {
+          while (cursor % 4) cursor++;
+          var out = new Uint8Array(cursor);
+          out.set(bin, 0);
+          for (var i = 0; i < chunks.length; i++) out.set(chunks[i].bytes, chunks[i].off);
+          return out;
+        }
+      };
+    }
+
+    function readAccessor(json, bin, index) {
+      var acc = json.accessors[index];
+      var comps = COMP_COUNT[acc.type];
+      var size = COMP_SIZE[acc.componentType];
+      var view = json.bufferViews[acc.bufferView];
+      var stride = view.byteStride || comps * size;
+      var base = (view.byteOffset || 0) + (acc.byteOffset || 0);
+      var dv = new DataView(bin.buffer, bin.byteOffset, bin.byteLength);
+      var out = new Float64Array(acc.count * comps);
+      for (var i = 0; i < acc.count; i++) {
+        for (var c = 0; c < comps; c++) {
+          var p = base + i * stride + c * size;
+          switch (acc.componentType) {
+            case 5126: out[i * comps + c] = dv.getFloat32(p, true); break;
+            case 5125: out[i * comps + c] = dv.getUint32(p, true); break;
+            case 5123: out[i * comps + c] = dv.getUint16(p, true); break;
+            case 5122: out[i * comps + c] = dv.getInt16(p, true); break;
+            case 5121: out[i * comps + c] = dv.getUint8(p); break;
+            default: out[i * comps + c] = dv.getInt8(p);
+          }
+        }
+      }
+      return { data: out, count: acc.count, comps: comps, componentType: acc.componentType };
+    }
+
+    // Union-find over shared vertices: each disconnected cluster of a mesh is
+    // one component, which is what we retarget the artwork onto.
+    function findComponents(json, bin, prim) {
+      var pos = readAccessor(json, bin, prim.attributes.POSITION);
+      var uv = readAccessor(json, bin, prim.attributes.TEXCOORD_0);
+      var idx = readAccessor(json, bin, prim.indices);
+      var parent = new Int32Array(pos.count);
+      var i;
+      for (i = 0; i < pos.count; i++) parent[i] = i;
+      function find(x) {
+        while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+        return x;
+      }
+      function union(a, b) {
+        a = find(a); b = find(b);
+        if (a !== b) parent[b] = a;
+      }
+      for (i = 0; i < idx.count; i += 3) {
+        var a = idx.data[i], b = idx.data[i + 1], c = idx.data[i + 2];
+        if (a !== b) union(a, b);
+        if (b !== c) union(b, c);
+        if (a !== c) union(a, c);
+      }
+      var groups = new Map();
+      for (i = 0; i < pos.count; i++) {
+        var root = find(i);
+        if (!groups.has(root)) groups.set(root, []);
+        groups.get(root).push(i);
+      }
+      var triMap = new Map();
+      for (i = 0; i < idx.count; i += 3) {
+        var r = find(idx.data[i]);
+        if (!triMap.has(r)) triMap.set(r, []);
+        var list = triMap.get(r);
+        list.push(idx.data[i], idx.data[i + 1], idx.data[i + 2]);
+      }
+      var out = [];
+      groups.forEach(function (verts, root) {
+        var u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+        var k;
+        for (k = 0; k < verts.length; k++) {
+          var u = uv.data[verts[k] * 2], w = uv.data[verts[k] * 2 + 1];
+          if (u < u0) u0 = u;
+          if (u > u1) u1 = u;
+          if (w < v0) v0 = w;
+          if (w > v1) v1 = w;
+        }
+        var tris = triMap.get(root) || [];
+        var area = 0;
+        for (k = 0; k < tris.length; k += 3) {
+          var p0 = tris[k] * 3, p1 = tris[k + 1] * 3, p2 = tris[k + 2] * 3;
+          var ax = pos.data[p1] - pos.data[p0], ay = pos.data[p1 + 1] - pos.data[p0 + 1], az = pos.data[p1 + 2] - pos.data[p0 + 2];
+          var bx = pos.data[p2] - pos.data[p0], by = pos.data[p2 + 1] - pos.data[p0 + 1], bz = pos.data[p2 + 2] - pos.data[p0 + 2];
+          area += 0.5 * Math.hypot(ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx);
+        }
+        out.push({ root: root, verts: verts, tris: tris, rect: [u0, u1, v0, v1], area: area });
+      });
+      out.sort(function (x, y) { return y.area - x.area; });
+      return { comps: out, vertexCount: pos.count };
+    }
+
+    function uvBoundsOf(uv) {
+      var u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+      for (var i = 0; i < uv.count; i++) {
+        var u = uv.data[i * 2], w = uv.data[i * 2 + 1];
+        if (u < u0) u0 = u;
+        if (u > u1) u1 = u;
+        if (w < v0) v0 = w;
+        if (w > v1) v1 = w;
+      }
+      return [u0, u1, v0, v1];
+    }
+
+    function pickByRect(comps, rect, tol) {
+      var best = null, bestErr = Infinity;
+      for (var i = 0; i < comps.length; i++) {
+        var r = comps[i].rect;
+        var err = Math.abs(r[0] - rect[0]) + Math.abs(r[1] - rect[1]) +
+                  Math.abs(r[2] - rect[2]) + Math.abs(r[3] - rect[3]);
+        if (err < bestErr) { bestErr = err; best = comps[i]; }
+      }
+      return bestErr <= tol ? best : null;
+    }
+
+    // Stretches the given UV rectangle onto [0,1]^2 so the artwork lines up, then
+    // applies the surface's orientation transform. A transform never touches the
+    // artwork bytes, only the coordinates, so no image re-encoding is needed.
+    function rewriteUvs(json, bin, uvIndex, verts, rect, transform) {
+      var acc = json.accessors[uvIndex];
+      if (acc.componentType !== 5126) {
+        throw new Error("TEXCOORD_0 componentType " + acc.componentType + " is not supported");
+      }
+      var size = COMP_SIZE[5126];
+      var view = json.bufferViews[acc.bufferView];
+      var stride = view.byteStride || COMP_COUNT[acc.type] * size;
+      var base = (view.byteOffset || 0) + (acc.byteOffset || 0);
+      var dv = new DataView(bin.buffer, bin.byteOffset, bin.byteLength);
+      var du = rect[1] - rect[0] || 1;
+      var dvSpan = rect[3] - rect[2] || 1;
+      var tr = transform || null;
+      for (var i = 0; i < verts.length; i++) {
+        var vals = [0, 0];
+        for (var c = 0; c < 2; c++) {
+          var p = base + verts[i] * stride + c * size;
+          var t = (dv.getFloat32(p, true) - (c === 0 ? rect[0] : rect[2])) /
+                  (c === 0 ? du : dvSpan);
+          vals[c] = t < 0 ? 0 : t > 1 ? 1 : t;
+        }
+        if (tr) {
+          if (tr.swap) {
+            var su = vals[0];
+            vals[0] = vals[1];
+            vals[1] = su;
+          }
+          if (tr.flipU) vals[0] = 1 - vals[0];
+          if (tr.flipV) vals[1] = 1 - vals[1];
+        }
+        for (var w = 0; w < 2; w++) {
+          dv.setFloat32(base + verts[i] * stride + w * size, vals[w], true);
+        }
+      }
+    }
+
+    // Re-projects a flat disc mesh planar-style from local POSITION so square
+    // artwork lands as a normal circular label. The disc is authored as a polar
+    // fan (u = angle, v = radius), which cannot carry circular art.
+    // The disc is flat in local X/Z with local +Y as its face normal. The scene
+    // rotates local +X onto world up and local +Z across the face, so v is
+    // driven by X and u by Z. Only v is subtracted: negating a single axis
+    // mirrors the label, and that is deliberate, because the disc is read from
+    // the reverse face where unmirrored artwork would come out backwards. The
+    // handedness is therefore correct for that viewing side only.
+    function projectDiscUvs(json, bin, posIndex, uvIndex) {
+      var pos = readAccessor(json, bin, posIndex);
+      var acc = json.accessors[uvIndex];
+      if (acc.componentType !== 5126) {
+        throw new Error("TEXCOORD_0 componentType " + acc.componentType + " is not supported");
+      }
+      var size = COMP_SIZE[5126];
+      var view = json.bufferViews[acc.bufferView];
+      var stride = view.byteStride || COMP_COUNT[acc.type] * size;
+      var base = (view.byteOffset || 0) + (acc.byteOffset || 0);
+      var dv = new DataView(bin.buffer, bin.byteOffset, bin.byteLength);
+
+      var cx = 0, cz = 0, i;
+      for (i = 0; i < pos.count; i++) {
+        cx += pos.data[i * 3];
+        cz += pos.data[i * 3 + 2];
+      }
+      cx /= pos.count;
+      cz /= pos.count;
+      var radius = 0;
+      for (i = 0; i < pos.count; i++) {
+        var dx = pos.data[i * 3] - cx;
+        var dz = pos.data[i * 3 + 2] - cz;
+        var d = Math.sqrt(dx * dx + dz * dz);
+        if (d > radius) radius = d;
+      }
+      var diameter = radius * 2 || 1;
+      for (i = 0; i < pos.count; i++) {
+        var u = 0.5 + (pos.data[i * 3 + 2] - cz) / diameter;
+        var v = 0.5 - (pos.data[i * 3] - cx) / diameter;
+        dv.setFloat32(base + i * stride, u < 0 ? 0 : u > 1 ? 1 : u, true);
+        dv.setFloat32(base + i * stride + size, v < 0 ? 0 : v > 1 ? 1 : v, true);
+      }
+      return { center: [cx, cz], radius: radius };
+    }
+
+    function addIndexAccessor(json, app, indices, vertexCount) {
+      var wide = vertexCount > 65535;
+      var bytes = new Uint8Array(indices.length * (wide ? 4 : 2));
+      var dv = new DataView(bytes.buffer);
+      for (var i = 0; i < indices.length; i++) {
+        if (wide) dv.setUint32(i * 4, indices[i], true);
+        else dv.setUint16(i * 2, indices[i], true);
+      }
+      var off = app.add(bytes);
+      json.bufferViews.push({ buffer: 0, byteOffset: off, byteLength: bytes.length });
+      json.accessors.push({
+        bufferView: json.bufferViews.length - 1,
+        componentType: wide ? 5125 : 5123,
+        count: indices.length,
+        type: "SCALAR"
+      });
+      return json.accessors.length - 1;
+    }
+
+    function pushPlainMaterial(json, name, color, alphaMode) {
+      json.materials.push({
+        name: name,
+        pbrMetallicRoughness: {
+          baseColorFactor: color,
+          metallicFactor: 0,
+          roughnessFactor: alphaMode === "BLEND" ? 1 : 0.8
+        },
+        alphaMode: alphaMode || "OPAQUE",
+        doubleSided: true
+      });
+      return json.materials.length - 1;
+    }
+
+    // baseBytes: pristine GLB. surfaces: { role: { bytes, mime } } for every
+    // key of CD_SURFACES. Returns a new patched GLB as a Uint8Array.
+    function patchCdSkin(baseBytes, surfaces) {
+      var parts = splitGlb(baseBytes);
+      var json = parts.json;
+      var app = makeAppender(parts.bin);
+
+      ["materials", "textures", "samplers", "images", "bufferViews", "accessors"]
+        .forEach(function (key) {
+          if (!json[key]) json[key] = [];
+        });
+      Object.keys(CD_SURFACES).forEach(function (role) {
+        if (!surfaces[role]) throw new Error("skin is missing surface: " + role);
+      });
+
+      // One shared sampler: clamped edges so remapped artwork never bleeds
+      // into its neighbour.
+      json.samplers.push({ magFilter: 9729, minFilter: 9987, wrapS: 33071, wrapT: 33071 });
+      var samplerIndex = json.samplers.length - 1;
+
+      var texIndex = {};
+      Object.keys(CD_SURFACES).forEach(function (role) {
+        var bytes = surfaces[role].bytes;
+        var off = app.add(bytes);
+        json.bufferViews.push({ buffer: 0, byteOffset: off, byteLength: bytes.length });
+        json.images.push({ bufferView: json.bufferViews.length - 1, mimeType: surfaces[role].mime });
+        json.textures.push({ sampler: samplerIndex, source: json.images.length - 1 });
+        texIndex[role] = json.textures.length - 1;
+      });
+
+      var matInner = pushPlainMaterial(json, "CD_Inner", CD_COLORS.inner);
+      var matRim = pushPlainMaterial(json, "CD_Rim", CD_COLORS.rim);
+      var artMat = {};
+      function artMaterial(role) {
+        if (artMat[role] === undefined) {
+          // Uniform roughness throughout: the source gloss maps belong to the
+          // placeholder artwork this skin replaces, so they no longer describe
+          // the surface once the UVs are re-oriented.
+          var pbr = {
+            baseColorTexture: { index: texIndex[role] },
+            baseColorFactor: [1, 1, 1, 1],
+            metallicFactor: 0,
+            roughnessFactor: 1
+          };
+          json.materials.push({
+            name: "CD_Art_" + role,
+            pbrMetallicRoughness: pbr,
+            alphaMode: "OPAQUE",
+            doubleSided: true
+          });
+          artMat[role] = json.materials.length - 1;
+        }
+        return artMat[role];
+      }
+
+      // Pass 1: analyse every mesh against the original bytes.
+      var analysis = [];
+      CD_MESH_PLAN.forEach(function (plan) {
+        var meshIndex = -1;
+        for (var m = 0; m < json.meshes.length; m++) {
+          if (json.meshes[m].name === plan.mesh) { meshIndex = m; break; }
+        }
+        if (meshIndex < 0) throw new Error("GLB patch: mesh not found: " + plan.mesh);
+        var mesh = json.meshes[meshIndex];
+        if (!mesh.primitives || mesh.primitives.length !== 1) {
+          throw new Error("GLB patch: " + plan.mesh + " needs exactly one primitive");
+        }
+        var prim = mesh.primitives[0];
+        var entry = {
+          plan: plan,
+          mesh: mesh,
+          prim: prim,
+          origMat: prim.material === undefined ? null : json.materials[prim.material],
+          comps: null,
+          vertexCount: 0,
+          artComp: null,
+          artRect: null,
+          artVerts: null
+        };
+        if (!plan.passthrough) {
+          if (plan.whole) {
+            // Disc is hundreds of loose triangles, so remap the whole mesh
+            // affinely instead of splitting per component. A planar surface
+            // ignores the authored UVs entirely and re-projects from POSITION.
+            var uv = readAccessor(json, parts.bin, prim.attributes.TEXCOORD_0);
+            var all = new Array(uv.count);
+            for (var i = 0; i < uv.count; i++) all[i] = i;
+            entry.vertexCount = uv.count;
+            entry.artVerts = all;
+            entry.artRect = uvBoundsOf(uv);
+            entry.surface = CD_SURFACES[plan.art] || null;
+          } else {
+            var found = findComponents(json, parts.bin, prim);
+            entry.comps = found.comps;
+            entry.vertexCount = found.vertexCount;
+            if (plan.art) {
+              entry.surface = CD_SURFACES[plan.art];
+              entry.artComp = pickByRect(found.comps, CD_SURFACES[plan.art].rect, 0.004);
+              if (!entry.artComp) {
+                throw new Error("GLB patch: no UV component matched " + plan.mesh + " for " + plan.art);
+              }
+              entry.artRect = entry.artComp.rect;
+              entry.artVerts = entry.artComp.verts;
+            }
+          }
+        }
+        analysis.push(entry);
+      });
+
+      // Pass 2: rebuild primitives and allocate new index accessors.
+      analysis.forEach(function (entry) {
+        var plan = entry.plan;
+        if (plan.passthrough) {
+          // Keep the primitive exactly as authored, including its original
+          // material and UVs.
+          return;
+        }
+        if (plan.whole) {
+          entry.prim.material = artMaterial(plan.art);
+          return;
+        }
+        var prims = [];
+        entry.comps.forEach(function (comp, ci) {
+          var material = comp === entry.artComp
+            ? artMaterial(plan.art)
+            : (ci < plan.innerTop ? matInner : matRim);
+          prims.push({
+            attributes: entry.prim.attributes,
+            indices: addIndexAccessor(json, app, comp.tris, entry.vertexCount),
+            mode: entry.prim.mode === undefined ? 4 : entry.prim.mode,
+            material: material
+          });
+        });
+        entry.mesh.primitives = prims;
+      });
+
+      // Pass 3: append-only buffer, then retarget the artwork UVs in place.
+      var bin = app.finish();
+      analysis.forEach(function (entry) {
+        if (!entry.artVerts) return;
+        var uvAttr = entry.prim.attributes.TEXCOORD_0;
+        var surface = entry.surface;
+        if (surface && surface.planar) {
+          projectDiscUvs(json, bin, entry.prim.attributes.POSITION, uvAttr);
+          return;
+        }
+        if (entry.artRect) {
+          rewriteUvs(json, bin, uvAttr, entry.artVerts, entry.artRect,
+            surface ? surface.transform : null);
+        }
+      });
+      if (json.buffers && json.buffers[0]) json.buffers[0].byteLength = bin.length;
+
+      return buildGlb(json, bin);
+    }
+    // ===== END PURE GLB CORE =====
+
+    // ===== DOM WIRING =====
+    var tuner = document.getElementById("tuner");
+    var modelSel = document.getElementById("tuner-model");
+    var animRow = document.getElementById("tuner-anim-row");
+    var animSel = document.getElementById("tuner-anim");
+    var animPlay = document.getElementById("tuner-animplay");
+    var skinRow = document.getElementById("tuner-skin-row");
+    var skinSel = document.getElementById("tuner-skin");
+    var rotateBtn = document.getElementById("tuner-rotate");
+    var speedRange = document.getElementById("tuner-speed");
+    var speedOut = document.getElementById("speed-out");
+    var resetBtn = document.getElementById("tuner-reset");
+    var viewer = document.getElementById("viewer");
+
+    var SKINS = {
+      "cd__jewel_case.glb": [
+        { id: "original", label: "Original", surfaces: null },
+        {
+          id: "vagrant-story",
+          label: "Vagrant Story",
+          surfaces: {
+            front: { src: "./media/vagrant-story/front.jpg", mime: "image/jpeg" },
+            back: { src: "./media/vagrant-story/back.jpg", mime: "image/jpeg" },
+            spine: { src: "./media/vagrant-story/spine.jpg", mime: "image/jpeg" },
+            disc: { src: "./media/vagrant-story/cd.png", mime: "image/png" }
+          }
+        },
+        {
+          id: "aconcagua",
+          label: "Aconcagua",
+          surfaces: {
+            front: { src: "./media/aconcagua/front.jpg", mime: "image/jpeg" },
+            back: { src: "./media/aconcagua/back.jpg", mime: "image/jpeg" },
+            spine: { src: "./media/aconcagua/spine.jpg", mime: "image/jpeg" },
+            disc: { src: "./media/aconcagua/cd.png", mime: "image/png" }
+          }
+        },
+        {
+          id: "mega-man-x6",
+          label: "Mega Man X6",
+          surfaces: {
+            front: { src: "./media/mega-man-x6/front.jpg", mime: "image/jpeg" },
+            back: { src: "./media/mega-man-x6/back.jpg", mime: "image/jpeg" },
+            spine: { src: "./media/mega-man-x6/spine.jpg", mime: "image/jpeg" },
+            disc: { src: "./media/mega-man-x6/cd.png", mime: "image/png" }
+          }
+        }
+      ]
+    };
+
+    var rotateOn = viewer.hasAttribute("auto-rotate");
+    rotateBtn.textContent = rotateOn ? "On" : "Off";
+
+    var lastSrc = "";
+    var byteCache = {};
+    var blobURL = null;
+    // Blob URLs cannot be revoked until the viewer finishes with them, and
+    // several can be superseded before that load arrives, so queue them all.
+    // A single slot would silently drop every URL but the most recent.
+    var staleURLs = [];
+    var skinToken = 0;
+
+    viewer.addEventListener("load", function () {
+      staleURLs.forEach(function (url) { URL.revokeObjectURL(url); });
+      staleURLs.length = 0;
+      syncAnimUI();
+    });
+
+    viewer.addEventListener("error", function () {
+      console.warn("Model failed to load:", lastSrc);
+    });
+
+    function fitModel() {
+      viewer.cameraOrbit = "0deg 75deg 105%";
+      viewer.cameraTarget = "auto auto auto";
+    }
+
+    function syncAnimUI() {
+      var names = viewer.availableAnimations || [];
+      if (!names.length) {
+        animRow.style.display = "none";
+        return;
+      }
+      animRow.style.display = "";
+      animSel.innerHTML = "";
+      var empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = "(Default)";
+      animSel.appendChild(empty);
+      names.forEach(function (n) {
+        var opt = document.createElement("option");
+        opt.value = n;
+        opt.textContent = n;
+        animSel.appendChild(opt);
+      });
+      animSel.value = "";
+      animPlay.disabled = true;
+      animPlay.textContent = viewer.paused ? "Play" : "Pause";
+    }
+
+    function returnToDefaultPose() {
+      viewer.animationName = undefined;
+    }
+
+    function labelize(name) {
+      return name
+        .replace(/\.glb$/i, "")
+        .replace(/[-_]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+    }
+
+    function fetchBytes(url) {
+      if (byteCache[url]) return Promise.resolve(byteCache[url]);
+      return fetch(url).then(function (res) {
+        if (!res.ok) throw new Error(url + " returned HTTP " + res.status);
+        return res.arrayBuffer();
+      }).then(function (buf) {
+        var bytes = new Uint8Array(buf);
+        byteCache[url] = bytes;
+        return bytes;
+      });
+    }
+
+    function releaseBlob() {
+      if (blobURL) {
+        staleURLs.push(blobURL);
+        blobURL = null;
+      }
+    }
+
+    function findSkin(model, skinId) {
+      var list = SKINS[model];
+      if (!list) return null;
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].id === skinId) return list[i];
+      }
+      return null;
+    }
+
+    function applySkin(model, skinId) {
+      var skin = findSkin(model, skinId);
+      var path = "./models/" + model;
+      var token = ++skinToken;
+
+      if (!skin || !skin.surfaces) {
+        releaseBlob();
+        viewer.src = path;
+        return;
+      }
+
+      var roles = Object.keys(CD_SURFACES);
+      Promise.all([fetchBytes(path)].concat(roles.map(function (role) {
+        return fetchBytes(skin.surfaces[role].src).then(function (bytes) {
+          return { role: role, bytes: bytes };
+        });
+      }))).then(function (results) {
+        var surfaces = {};
+        // results[0] is the pristine GLB; results[1..] are { role, bytes } artwork entries.
+        for (var i = 1; i < results.length; i++) {
+          surfaces[results[i].role] = { bytes: results[i].bytes, mime: skin.surfaces[results[i].role].mime };
+        }
+        var patched = patchCdSkin(results[0], surfaces);
+        if (token !== skinToken) return;
+        releaseBlob();
+        blobURL = URL.createObjectURL(new Blob([patched], { type: "model/gltf-binary" }));
+        viewer.src = blobURL;
+      }).catch(function (err) {
+        console.error("Skin failed:", err);
+        window.alert("Could not apply skin: " + err.message);
+      });
+    }
+
+    function syncSkinUI(model) {
+      var list = SKINS[model];
+      if (!list) {
+        skinRow.style.display = "none";
+        return;
+      }
+      skinSel.innerHTML = "";
+      list.forEach(function (skin) {
+        var opt = document.createElement("option");
+        opt.value = skin.id;
+        opt.textContent = skin.label;
+        skinSel.appendChild(opt);
+      });
+      skinSel.value = list[0].id;
+      skinRow.style.display = "";
+    }
+
+    function loadModel(model) {
+      lastSrc = "./models/" + model;
+      syncSkinUI(model);
+      applySkin(model, skinSel.value || "");
+      fitModel();
+    }
+
+    function buildSelect(files) {
+      var sorted = files.slice().sort(function (a, b) {
+        return a.toLowerCase() < b.toLowerCase() ? -1 : 1;
+      });
+      modelSel.innerHTML = "";
+      sorted.forEach(function (file) {
+        var opt = document.createElement("option");
+        opt.value = file;
+        opt.textContent = labelize(file);
+        modelSel.appendChild(opt);
+      });
+      if (sorted.length) {
+        modelSel.value = sorted[0];
+        loadModel(sorted[0]);
+      }
+    }
+
+    var MODELS = [
+      "cd__jewel_case.glb"
+    ];
+
+    buildSelect(MODELS);
+
+    function applySpeed() {
+      var deg = parseInt(speedRange.value, 10);
+      speedOut.textContent = deg;
+      viewer.setAttribute("rotation-per-second", deg + "deg");
+      viewer.rotationPerSecond = deg + "deg";
+      if (rotateOn) {
+        viewer.autoRotate = false;
+        setTimeout(function () {
+          viewer.autoRotate = true;
+        }, 60);
+      }
+    }
+
+    modelSel.addEventListener("change", function () {
+      loadModel(modelSel.value);
+    });
+
+    skinSel.addEventListener("change", function () {
+      var model = modelSel.value;
+      lastSrc = SKINS[model] ? skinSel.value : model;
+      applySkin(model, skinSel.value);
+    });
+
+    animSel.addEventListener("change", function () {
+      if (animSel.value) {
+        viewer.animationName = animSel.value;
+        viewer.play();
+        animPlay.disabled = false;
+        animPlay.textContent = "Pause";
+      } else {
+        returnToDefaultPose();
+        animPlay.disabled = true;
+      }
+    });
+
+    animPlay.addEventListener("click", function () {
+      if (viewer.paused) {
+        viewer.play();
+      } else {
+        viewer.pause();
+      }
+      animPlay.textContent = viewer.paused ? "Play" : "Pause";
+    });
+
+    rotateBtn.addEventListener("click", function () {
+      rotateOn = !rotateOn;
+      viewer.autoRotate = rotateOn;
+      rotateBtn.textContent = rotateOn ? "On" : "Off";
+    });
+
+    speedRange.addEventListener("input", applySpeed);
+
+    resetBtn.addEventListener("click", function () {
+      viewer.resetTurntableRotation();
+      fitModel();
+      speedRange.value = 30;
+      applySpeed();
+    });
+
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "f" || e.key === "F") {
+        tuner.classList.toggle("show");
+      }
+    });
+
+    applySpeed();
+  </script>
+</body>
+</html>
