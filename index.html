@@ -77,6 +77,56 @@
       cursor: pointer;
     }
     #tuner button:active { transform: translate(2px, 2px); box-shadow: none; }
+    #tuner .tuner-list {
+      margin: 4px 0 8px 0;
+      max-height: 190px;
+      overflow-y: auto;
+      background: #14120f;
+      border: 2px solid #54514a;
+      scrollbar-width: thin;
+      scrollbar-color: #54514a #14120f;
+    }
+    #tuner .tuner-list::-webkit-scrollbar { width: 10px; }
+    #tuner .tuner-list::-webkit-scrollbar-track { background: #14120f; }
+    #tuner .tuner-list::-webkit-scrollbar-thumb {
+      background: #54514a;
+      border: 2px solid #14120f;
+    }
+    #tuner .tuner-list button {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      height: 30px;
+      padding: 0 6px;
+      overflow: hidden;
+      text-align: left;
+      background: transparent;
+      border: 0;
+      box-shadow: none;
+      color: var(--ui-dim);
+    }
+    #tuner .tuner-list button + button { border-top: 2px solid #232019; }
+    #tuner .tuner-list button:hover { background: #232019; color: #f4f1ea; }
+    #tuner .tuner-list button:active { transform: none; background: #2e2a22; }
+    #tuner .tuner-list button.selected {
+      background: #54514a;
+      color: var(--ui-mod);
+    }
+    #tuner .tuner-list .thumb {
+      flex: none;
+      width: 22px;
+      height: 22px;
+      object-fit: cover;
+      background: #9ea1a3;
+    }
+    #tuner .tuner-list .list-label {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     #tuner select {
       flex: 1;
       min-width: 0;
@@ -102,12 +152,14 @@
   <div id="tuner">
     <h1>Tuner <span>(F)</span></h1>
     <div class="tuner-row">
-      <label for="tuner-model">Model</label>
-      <select id="tuner-model"></select>
+      <label>Model</label>
     </div>
-    <div class="tuner-row" id="tuner-skin-row" style="display:none;">
-      <label for="tuner-skin">Skin</label>
-      <select id="tuner-skin"></select>
+    <div id="tuner-models" class="tuner-list" role="listbox" aria-label="Model"></div>
+    <div id="tuner-skin-group" style="display:none;">
+      <div class="tuner-row">
+        <label>Skin</label>
+      </div>
+      <div id="tuner-skins" class="tuner-list" role="listbox" aria-label="Skin"></div>
     </div>
     <div class="tuner-row">
       <label for="tuner-rotate">Auto-Rotate</label>
@@ -144,10 +196,11 @@
 
     var SKINS = {
       "cd__jewel_case.glb": [
-        { id: "original", label: "Original", surfaces: null },
+        { id: "original", label: "Original", thumb: null, surfaces: null },
         {
           id: "vagrant-story",
           label: "Vagrant Story",
+          thumb: "./media/thumbs/vagrant-story.jpg",
           surfaces: {
             front: { src: "./media/vagrant-story/front.jpg", mime: "image/jpeg" },
             back: { src: "./media/vagrant-story/back.jpg", mime: "image/jpeg" },
@@ -158,6 +211,7 @@
         {
           id: "aconcagua",
           label: "Aconcagua",
+          thumb: "./media/thumbs/aconcagua.jpg",
           surfaces: {
             front: { src: "./media/aconcagua/front.jpg", mime: "image/jpeg" },
             back: { src: "./media/aconcagua/back.jpg", mime: "image/jpeg" },
@@ -168,6 +222,7 @@
         {
           id: "mega-man-x6",
           label: "Mega Man X6",
+          thumb: "./media/thumbs/mega-man-x6.jpg",
           surfaces: {
             front: { src: "./media/mega-man-x6/front.jpg", mime: "image/jpeg" },
             back: { src: "./media/mega-man-x6/back.jpg", mime: "image/jpeg" },
@@ -178,6 +233,7 @@
         {
           id: "parasite-eve",
           label: "Parasite Eve",
+          thumb: "./media/thumbs/parasite-eve.jpg",
           surfaces: {
             front: { src: "./media/parasite-eve/front.jpg", mime: "image/jpeg" },
             back: { src: "./media/parasite-eve/back.jpg", mime: "image/jpeg" },
@@ -188,6 +244,7 @@
         {
           id: "xenogears",
           label: "Xenogears",
+          thumb: "./media/thumbs/xenogears.jpg",
           surfaces: {
             front: { src: "./media/xenogears/front.jpg", mime: "image/jpeg" },
             back: { src: "./media/xenogears/back.jpg", mime: "image/jpeg" },
@@ -198,6 +255,7 @@
         {
           id: "silent-hill",
           label: "Silent Hill",
+          thumb: "./media/thumbs/silent-hill.jpg",
           surfaces: {
             front: { src: "./media/silent-hill/front.jpg", mime: "image/jpeg" },
             back: { src: "./media/silent-hill/back.jpg", mime: "image/jpeg" },
@@ -646,9 +704,9 @@
     }
 
     var tuner = document.getElementById("tuner");
-    var modelSel = document.getElementById("tuner-model");
-    var skinRow = document.getElementById("tuner-skin-row");
-    var skinSel = document.getElementById("tuner-skin");
+    var modelList = document.getElementById("tuner-models");
+    var skinGroup = document.getElementById("tuner-skin-group");
+    var skinList = document.getElementById("tuner-skins");
     var rotateBtn = document.getElementById("tuner-rotate");
     var speedRange = document.getElementById("tuner-speed");
     var speedOut = document.getElementById("speed-out");
@@ -656,6 +714,7 @@
     var viewer = document.getElementById("viewer");
 
     var rotateOn = viewer.hasAttribute("auto-rotate");
+    var currentModel = "";
     var lastSrc = "";
     var byteCache = {};
     var blobURL = null;
@@ -669,19 +728,16 @@
 
     function syncSkinUI(model) {
       var list = SKINS[model];
-      if (!list) {
-        skinRow.style.display = "none";
-        return;
+      if (!list || !list.length) {
+        skinGroup.style.display = "none";
+        return "";
       }
-      skinSel.innerHTML = "";
-      list.forEach(function (skin) {
-        var opt = document.createElement("option");
-        opt.value = skin.id;
-        opt.textContent = skin.label;
-        skinSel.appendChild(opt);
+      skinGroup.style.display = "";
+      return buildList(skinList, list.map(function (skin) {
+        return { value: skin.id, label: skin.label, thumb: skin.thumb !== undefined ? skin.thumb : null };
+      }), function (id) {
+        applySkin(currentModel, id);
       });
-      skinSel.value = list[0].id;
-      skinRow.style.display = "";
     }
 
     function labelize(name) {
@@ -755,27 +811,59 @@
       });
     }
 
+    function buildList(container, items, onSelect) {
+      container.innerHTML = "";
+      var firstBtn = null;
+      items.forEach(function (item) {
+        var btn = document.createElement("button");
+        btn.type = "button";
+        if (item.thumb !== undefined) {
+          var thumb;
+          if (item.thumb) {
+            thumb = document.createElement("img");
+            thumb.className = "thumb";
+            thumb.src = item.thumb;
+            thumb.alt = "";
+          } else {
+            thumb = document.createElement("span");
+            thumb.className = "thumb";
+          }
+          btn.appendChild(thumb);
+        }
+        var label = document.createElement("span");
+        label.className = "list-label";
+        label.textContent = item.label;
+        btn.appendChild(label);
+        btn.addEventListener("click", function () {
+          if (btn.classList.contains("selected")) return;
+          container.querySelectorAll("button").forEach(function (b) {
+            b.classList.remove("selected");
+          });
+          btn.classList.add("selected");
+          onSelect(item.value);
+        });
+        container.appendChild(btn);
+        if (!firstBtn) firstBtn = btn;
+      });
+      if (firstBtn) firstBtn.classList.add("selected");
+      return items.length ? items[0].value : "";
+    }
+
     function loadModel(model) {
-      syncSkinUI(model);
-      applySkin(model, skinSel.value || "");
+      currentModel = model;
+      var skinId = syncSkinUI(model);
+      applySkin(model, skinId || "");
       fitModel();
     }
 
-    function buildSelect(files) {
+    function buildModelList(files) {
       var sorted = files.slice().sort(function (a, b) {
         return a.toLowerCase() < b.toLowerCase() ? -1 : 1;
       });
-      modelSel.innerHTML = "";
-      sorted.forEach(function (file) {
-        var opt = document.createElement("option");
-        opt.value = file;
-        opt.textContent = labelize(file);
-        modelSel.appendChild(opt);
-      });
-      if (sorted.length) {
-        modelSel.value = sorted[0];
-        loadModel(sorted[0]);
-      }
+      var first = buildList(modelList, sorted.map(function (file) {
+        return { value: file, label: labelize(file) };
+      }), loadModel);
+      if (first) loadModel(first);
     }
 
     function applySpeed() {
@@ -797,15 +885,6 @@
 
     viewer.addEventListener("error", function () {
       console.warn("Model failed to load:", lastSrc);
-    });
-
-    modelSel.addEventListener("change", function () {
-      loadModel(modelSel.value);
-    });
-
-    skinSel.addEventListener("change", function () {
-      var model = modelSel.value;
-      applySkin(model, skinSel.value);
     });
 
     rotateBtn.addEventListener("click", function () {
@@ -830,7 +909,7 @@
     });
 
     rotateBtn.textContent = rotateOn ? "On" : "Off";
-    buildSelect(MODELS);
+    buildModelList(MODELS);
     applySpeed();
   </script>
 </body>
