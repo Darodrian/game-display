@@ -196,18 +196,6 @@
 
     var SKINS = {
       "cd__jewel_case.glb": [
-        { id: "original", label: "Original", thumb: null, surfaces: null },
-        {
-          id: "vagrant-story",
-          label: "Vagrant Story",
-          thumb: "./media/thumbs/vagrant-story.jpg",
-          surfaces: {
-            front: { src: "./media/vagrant-story/front.jpg", mime: "image/jpeg" },
-            back: { src: "./media/vagrant-story/back.jpg", mime: "image/jpeg" },
-            spine: { src: "./media/vagrant-story/spine.jpg", mime: "image/jpeg" },
-            disc: { src: "./media/vagrant-story/cd.png", mime: "image/png" }
-          }
-        },
         {
           id: "aconcagua",
           label: "Aconcagua",
@@ -242,17 +230,6 @@
           }
         },
         {
-          id: "xenogears",
-          label: "Xenogears",
-          thumb: "./media/thumbs/xenogears.jpg",
-          surfaces: {
-            front: { src: "./media/xenogears/front.jpg", mime: "image/jpeg" },
-            back: { src: "./media/xenogears/back.jpg", mime: "image/jpeg" },
-            spine: { src: "./media/xenogears/spine.jpg", mime: "image/jpeg" },
-            disc: { src: "./media/xenogears/cd.png", mime: "image/png" }
-          }
-        },
-        {
           id: "silent-hill",
           label: "Silent Hill",
           thumb: "./media/thumbs/silent-hill.jpg",
@@ -261,6 +238,28 @@
             back: { src: "./media/silent-hill/back.jpg", mime: "image/jpeg" },
             spine: { src: "./media/silent-hill/spine.jpg", mime: "image/jpeg" },
             disc: { src: "./media/silent-hill/cd.png", mime: "image/png" }
+          }
+        },
+        {
+          id: "vagrant-story",
+          label: "Vagrant Story",
+          thumb: "./media/thumbs/vagrant-story.jpg",
+          surfaces: {
+            front: { src: "./media/vagrant-story/front.jpg", mime: "image/jpeg" },
+            back: { src: "./media/vagrant-story/back.jpg", mime: "image/jpeg" },
+            spine: { src: "./media/vagrant-story/spine.jpg", mime: "image/jpeg" },
+            disc: { src: "./media/vagrant-story/cd.png", mime: "image/png" }
+          }
+        },
+        {
+          id: "xenogears",
+          label: "Xenogears",
+          thumb: "./media/thumbs/xenogears.jpg",
+          surfaces: {
+            front: { src: "./media/xenogears/front.jpg", mime: "image/jpeg" },
+            back: { src: "./media/xenogears/back.jpg", mime: "image/jpeg" },
+            spine: { src: "./media/xenogears/spine.jpg", mime: "image/jpeg" },
+            disc: { src: "./media/xenogears/cd.png", mime: "image/png" }
           }
         }
       ]
@@ -713,7 +712,24 @@
     var resetBtn = document.getElementById("tuner-reset");
     var viewer = document.getElementById("viewer");
 
-    var rotateOn = viewer.hasAttribute("auto-rotate");
+    var SETTINGS_KEY = "game-display.settings";
+    var settings = (function () {
+      var defaults = { model: "", skin: "", rotate: null, speed: 30 };
+      var stored = {};
+      try { stored = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch (err) { stored = {}; }
+      Object.keys(defaults).forEach(function (key) {
+        if (stored[key] !== undefined && stored[key] !== null) defaults[key] = stored[key];
+      });
+      return defaults;
+    })();
+
+    function persist() {
+      try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (err) {}
+    }
+
+    var rotateOn = typeof settings.rotate === "boolean"
+      ? settings.rotate
+      : viewer.hasAttribute("auto-rotate");
     var currentModel = "";
     var lastSrc = "";
     var byteCache = {};
@@ -726,18 +742,23 @@
       viewer.cameraTarget = "auto auto auto";
     }
 
-    function syncSkinUI(model) {
+    function syncSkinUI(model, preferredSkin) {
       var list = SKINS[model];
       if (!list || !list.length) {
         skinGroup.style.display = "none";
         return "";
       }
       skinGroup.style.display = "";
-      return buildList(skinList, list.map(function (skin) {
+      var skinId = buildList(skinList, list.map(function (skin) {
         return { value: skin.id, label: skin.label, thumb: skin.thumb !== undefined ? skin.thumb : null };
-      }), function (id) {
+      }), preferredSkin, function (id) {
+        settings.skin = id;
+        persist();
         applySkin(currentModel, id);
       });
+      settings.skin = skinId;
+      persist();
+      return skinId;
     }
 
     function labelize(name) {
@@ -811,9 +832,9 @@
       });
     }
 
-    function buildList(container, items, onSelect) {
+    function buildList(container, items, selectedValue, onSelect) {
       container.innerHTML = "";
-      var firstBtn = null;
+      var buttons = [];
       items.forEach(function (item) {
         var btn = document.createElement("button");
         btn.type = "button";
@@ -843,27 +864,34 @@
           onSelect(item.value);
         });
         container.appendChild(btn);
-        if (!firstBtn) firstBtn = btn;
+        buttons.push({ btn: btn, value: item.value });
       });
-      if (firstBtn) firstBtn.classList.add("selected");
-      return items.length ? items[0].value : "";
+      var pick = 0;
+      for (var i = 0; i < buttons.length; i++) {
+        if (buttons[i].value === selectedValue) { pick = i; break; }
+      }
+      if (!buttons.length) return "";
+      buttons[pick].btn.classList.add("selected");
+      return buttons[pick].value;
     }
 
     function loadModel(model) {
       currentModel = model;
-      var skinId = syncSkinUI(model);
+      settings.model = model;
+      persist();
+      var skinId = syncSkinUI(model, settings.skin);
       applySkin(model, skinId || "");
       fitModel();
     }
 
-    function buildModelList(files) {
+    function buildModelList(files, preferred) {
       var sorted = files.slice().sort(function (a, b) {
         return a.toLowerCase() < b.toLowerCase() ? -1 : 1;
       });
-      var first = buildList(modelList, sorted.map(function (file) {
+      var chosen = buildList(modelList, sorted.map(function (file) {
         return { value: file, label: labelize(file) };
-      }), loadModel);
-      if (first) loadModel(first);
+      }), preferred, loadModel);
+      if (chosen) loadModel(chosen);
     }
 
     function applySpeed() {
@@ -891,15 +919,19 @@
       rotateOn = !rotateOn;
       viewer.autoRotate = rotateOn;
       rotateBtn.textContent = rotateOn ? "On" : "Off";
+      settings.rotate = rotateOn;
+      persist();
     });
 
-    speedRange.addEventListener("input", applySpeed);
+    speedRange.addEventListener("input", function () {
+      applySpeed();
+      settings.speed = parseInt(speedRange.value, 10);
+      persist();
+    });
 
     resetBtn.addEventListener("click", function () {
       viewer.resetTurntableRotation();
       fitModel();
-      speedRange.value = 30;
-      applySpeed();
     });
 
     document.addEventListener("keydown", function (e) {
@@ -908,8 +940,14 @@
       }
     });
 
+    var startSpeed = parseInt(settings.speed, 10);
+    if (!(startSpeed >= 5 && startSpeed <= 150)) startSpeed = 30;
+    settings.speed = startSpeed;
+    speedRange.value = startSpeed;
+    if (rotateOn) viewer.setAttribute("auto-rotate", "");
+    else viewer.removeAttribute("auto-rotate");
     rotateBtn.textContent = rotateOn ? "On" : "Off";
-    buildModelList(MODELS);
+    buildModelList(MODELS, settings.model);
     applySpeed();
   </script>
 </body>
